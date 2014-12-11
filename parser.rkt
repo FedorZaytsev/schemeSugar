@@ -1,34 +1,5 @@
 #lang racket
-
-(define (file->list-of-chars file)
-  (with-input-from-file file
-    (lambda ()
-      (let reading ((chars '()))
-        (let ((char (read-char)))
-          (if (eof-object? char)
-              (reverse chars)
-              (reading (cons char chars))))))))
-
-(define (list-find lst el)
-  (define (list-find-rec lst el idx)
-    (if (null? lst)
-        #f
-        (if (equal? (car lst) el)
-            idx
-            (list-find-rec (cdr lst) el (+ idx 1)))))
-  (list-find-rec lst el 0))
-
-(define (list-mid lst from to)
-  (take (list-tail lst from) (- to from)))
-
-; Check if list begins with given list
-; Return boolean
-(define (list-begins-with? lst lst2)
-  (if (null? lst2)
-      #t
-      (if (equal? (car lst) (car lst2))
-          (list-begins-with? (cdr lst) (cdr lst2))
-          #f)))
+(include "utils.rkt")
 
 ; Primitive parse
 ; Decide if str begins with special lexem (e.g. let = + -)
@@ -36,7 +7,7 @@
 ; Return 'nothing if fail
 (define (lexical-special-lexem str)
   (cond ((equal? (car str) #\=) (list '("=") (list-tail str 1)))
-        ((char-whitespace? (car str)) (list '() (cdr str)))
+        ((char-whitespace? (car str)) (list (list (string (car str))) (cdr str)))
         ((list-begins-with? str '(#\l #\e #\t)) (list '("let") (list-tail str 3)))
         (else 'nothing)))
 
@@ -59,66 +30,54 @@
         (process-result buffer result (list '() '())))) 
   (lexical-parse-rec str '() '()))
 
-(define (type-name? el)
-  (and (equal? (string->number el) #f) (not (lexical-special-lexem? (string->list el)))))
-
-(define (type-not-language? el)
-  (not (lexical-special-lexem? (string->list el))))
-
 (define (syntax-let? data)
   (and 
-   (equal? (car data) "let")
-   (type-name? (list-ref data 1))
-   (equal? (list-ref data 2) "=")
-   (type-not-language? (list-ref data 3))
-   (>= (length data) 4)))
+   (equal? (get-lexem data 0) "let")
+   (type-name? (get-lexem data 1))
+   (equal? (get-lexem data 2) "=")
+   (type-not-language? (get-lexem data 3))
+   (>= (syntax-length data) 4)))
 
 (define (syntax-let data)
-  (list (list-tail data 4) (list "(" "define" " " (list-ref data 1) " " (list-ref data 3) ")" "\n")))
+  (list (syntax-tail data 4) (list "(" "define" " " (get-lexem data 1) " " (get-lexem data 3) ")" "\n")))
 
 (define (syntax-set? data)
   (and 
-   (>= (length data) 3)
-   (equal? (cadr data) "=")
-   (type-name? (car data))
-   (type-not-language? (list-ref data 2))))
+   (>= (syntax-length data) 3)
+   (type-name? (get-lexem data 0))
+   (equal? (get-lexem data 1) "=")
+   (type-not-language? (get-lexem data 2))))
 
 (define (syntax-set data)
-  (list (list-tail data 3) (list "(" "set!" " " (car data) " " (list-ref data 2) ")" "\n")))
+  (list (syntax-tail data 3) (list "(" "set!" " " (get-lexem data 0) " " (get-lexem data 2) ")" "\n")))
 
 (define (syntax-equal? data)
   (and
-   (>= (length data) 4)
-   (equal? (list-ref data 1) "=")
-   (equal? (list-ref data 2) "=")
-   (type-name? (car data))
-   (type-not-language? (list-ref data 3))))
+   (>= (syntax-length data) 4)
+   (type-name? (get-lexem data 0))
+   (equal? (get-lexem data 1) "=")
+   (equal? (get-lexem data 2) "=")
+   (type-not-language? (get-lexem data 3))))
 
 (define (syntax-equal data)
-  (list (list-tail data 4) (list "(" "equal?" " " (car data) " " (list-ref data 3) ")" "\n")))
+  (list (syntax-tail data 4) (list "(" "equal?" " " (get-lexem data 0) " " (get-lexem data 3) ")" "\n")))
 
 (define (syntax-if? data)
   (and
-   (>= (length data) 4)
-   (equal? (car data) "if")
+   (>= (syntax-length data) 4)
+   (equal? (get-lexem data 0) "if")
    (not (equal? (member "then" data) #f))
    (not (equal? (member "end" data) #f))
    (< (list-find data "then") (list-find data "end"))))
 
-(define (remove-last-newline data)
-  (if (equal? (last data) "\n")
-      (take data (- (length data) 1))
-      data))
-      
-
 (define (syntax-if-then-end data)
   (list (list-tail data (+ (list-find data "end") 1)) (append '( "(" "if" " ")
-                                                              (remove-last-newline (syntax-parse (list-mid data 1 (list-find data "then"))))
+                                                              (remove-last-newline (syntax-parse (list-mid data (+ (list-find data "if") 1) (list-find data "then"))))
                                                               (remove-last-newline (syntax-parse (list-mid data (+ (list-find data "then") 1) (list-find data "end"))))
                                                               '(")" "\n"))))
 (define (syntax-if-then-else-end data)
   (list (list-tail data (+ (list-find data "end") 1)) (append '( "(" "if" " ")
-                                                              (remove-last-newline (syntax-parse (list-mid data 1 (list-find data "then"))))
+                                                              (remove-last-newline (syntax-parse (list-mid data (+ (list-find data "if") 1) (list-find data "then"))))
                                                               (remove-last-newline (syntax-parse (list-mid data (+ (list-find data "then") 1) (list-find data "else"))))
                                                               (remove-last-newline (syntax-parse (list-mid data (+ (list-find data "else") 1) (list-find data "end"))))
                                                               '(")" "\n"))))
@@ -131,18 +90,20 @@
 
 (define (syntax-scheme? data)
   (and
-   (>= (length data) 2)
-   (equal? (car data) "scheme")
+   (>= (syntax-length data) 2)
+   (equal? (get-lexem data 0) "scheme")
    (not (equal? (member "end" data) #f))))
 
 (define (syntax-scheme data)
-  (list (list-tail data (+ (list-find data "end") 1)) (list-mid data 1 (list-find data "end"))))
+  (list (list-tail data (+ (list-find data "end") 1)) (list-mid data (+ (list-find data "scheme") 1) (list-find data "end"))))
+        
       
 
 (define (syntax-parse data)
   (define (syntax-parse-rec data result)
     (if (not (null? data))
-        (cond 
+        (cond
+          ((string-whitespace? (car data)) (syntax-parse-rec (cdr data) result))
           ((syntax-let? data)
            (let ((let-result (syntax-let data)))
              (syntax-parse-rec (car let-result) (append result (cadr let-result)))))
@@ -163,18 +124,5 @@
   (syntax-parse-rec data '()))
 
 
-(display (apply string-append (syntax-parse (lexical-parse (file->list-of-chars "/Users/lobster/documents/sample.rkt")))))
+(display (apply string-append (syntax-parse (lexical-parse (file->list-of-chars "/Users/lobster/documents/bmstu/scheme/work/sample.rkt")))))
 
-
-
-
-;(read-all "")
-;(define get-Type
-;  (lambda (x)
-;    (cond ((number? x) "Number")
-;          ((pair? x) "Pair")
-;          ((string? x) "String")
-;          ((list? x) "List"))))
-
-;(define (read in) "read");(string-append "read:" (read-all in)))
-;(define (read-syntax src in) (get-Type src));(string-append "read-syntax:" (read-all in)))
